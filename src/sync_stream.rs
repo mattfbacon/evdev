@@ -764,98 +764,85 @@ mod tokio_stream {
 
     /// An asynchronous stream of input events.
     ///
-    /// This can be used by calling [`stream.next_event().await?`](Self::next_event), or if you
-    /// need to pass it as a stream somewhere, the [`futures::Stream`](Stream) implementation.
-    /// There's also a lower-level [`Self::poll_event`] function if you need to fetch an event from
+    /// This can be used by calling [`stream.next_event().await?`](Self::next_event).
+    /// There's also a lower-level [`Self::poll_event`] function if you need to fetch events from
     /// inside a `Future::poll` impl.
     pub struct EventStream {
         device: AsyncFd<Device>,
-        event_range: std::ops::Range<usize>,
+    }
+
+    impl Unpin for EventStream {}
+
+    struct PartialEvents {
+        range: std::ops::Range<usize>,
         consumed_to: usize,
         sync: Option<SyncState>,
     }
-    impl Unpin for EventStream {}
+
+    impl PartialEvents {
+        pub fn into_full(self, dev: &mut Device) -> FetchEventsSynced<'_> {
+            FetchEventsSynced {
+                dev,
+                range: self.range,
+                consumed_to: self.consumed_to,
+                sync: self.sync,
+            }
+        }
+    }
 
     impl EventStream {
         pub(crate) fn new(device: Device) -> io::Result<Self> {
             use nix::fcntl;
             fcntl::fcntl(device.as_raw_fd(), fcntl::F_SETFL(fcntl::OFlag::O_NONBLOCK))?;
             let device = AsyncFd::new(device)?;
-            Ok(Self {
-                device,
-                event_range: 0..0,
-                consumed_to: 0,
-                sync: None,
-            })
+            Ok(Self { device })
         }
 
-        /// Returns a reference to the underlying device
+        /// Returns a reference to the underlying device.
         pub fn device(&self) -> &Device {
             self.device.get_ref()
         }
 
-        /// Returns a mutable reference to the underlying device
+        /// Returns a mutable reference to the underlying device.
         pub fn device_mut(&mut self) -> &mut Device {
             self.device.get_mut()
         }
 
-        /// Try to wait for the next event in this stream. Any errors are likely to be fatal, i.e.
+        /// Try to wait for the next event in this stream.
+        ///
+        /// Any errors are likely to be fatal, i.e.,
         /// any calls afterwards will likely error as well.
-        pub async fn next_event(&mut self) -> io::Result<InputEvent> {
-            poll_fn(|cx| self.poll_event(cx)).await
+        pub async fn next_event(&mut self) -> io::Result<FetchEventsSynced<'_>> {
+            poll_fn(|cx| self.poll_event_(cx))
+                .await
+                .map(|partial| partial.into_full(self.device_mut()))
         }
 
         /// A lower-level function for directly polling this stream.
-        pub fn poll_event(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<InputEvent>> {
-            'outer: loop {
-                let dev = self.device.get_mut();
-                if let Some(ev) = compensate_events(&mut self.sync, dev) {
-                    return Poll::Ready(Ok(ev));
-                }
-                let state = &mut dev.state;
-                let (res, consumed_to) =
-                    sync_events(&mut self.event_range, &dev.raw.event_buf, |ev| {
-                        state.process_event(ev)
-                    });
-                if let Some(end) = consumed_to {
-                    self.consumed_to = end
-                }
+        pub fn poll_event(
+            &mut self,
+            cx: &mut Context<'_>,
+        ) -> Poll<io::Result<FetchEventsSynced<'_>>> {
+            self.poll_event_(cx)
+                .map(|res| res.map(|partial| partial.into_full(self.device_mut())))
+        }
+
+        fn poll_event_(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<PartialEvents>> {
+            loop {
+                let mut guard = ready!(self.device.poll_read_ready_mut(cx))?;
+
+                let res = guard.try_io(|device| device.get_mut().fetch_events_inner());
                 match res {
-                    Ok(ev) => return Poll::Ready(Ok(InputEvent::from(ev))),
-                    Err(requires_sync) => {
-                        if requires_sync {
-                            dev.block_dropped = true;
-                        }
+                    Ok(res) => {
+                        return Poll::Ready(res.map(|sync| PartialEvents {
+                            range: 0..0,
+                            consumed_to: 0,
+                            sync,
+                        }))
                     }
-                }
-                dev.raw.event_buf.drain(..self.consumed_to);
-                self.consumed_to = 0;
-
-                loop {
-                    let mut guard = ready!(self.device.poll_read_ready_mut(cx))?;
-
-                    let res = guard.try_io(|device| device.get_mut().fetch_events_inner());
-                    match res {
-                        Ok(res) => {
-                            self.sync = res?;
-                            self.event_range = 0..0;
-                            continue 'outer;
-                        }
-                        Err(_would_block) => continue,
-                    }
+                    Err(_would_block) => continue,
                 }
             }
-        }
-    }
-
-    #[cfg(feature = "stream-trait")]
-    impl futures_core::Stream for EventStream {
-        type Item = io::Result<InputEvent>;
-        fn poll_next(
-            self: std::pin::Pin<&mut Self>,
-            cx: &mut Context<'_>,
-        ) -> Poll<Option<Self::Item>> {
-            self.get_mut().poll_event(cx).map(Some)
         }
     }
 }
