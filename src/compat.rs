@@ -20,16 +20,20 @@ cfg_if! {
         pub(crate) use libc::{
             ff_condition_effect, ff_constant_effect, ff_envelope, ff_periodic_effect, ff_ramp_effect,
             ff_replay, ff_rumble_effect, ff_trigger, input_absinfo, input_event, input_id,
-            input_keymap_entry, uinput_abs_setup, uinput_setup, ABS_CNT, EV_CNT, FF_CNT, INPUT_PROP_CNT,
-            KEY_CNT, LED_CNT, MSC_CNT, REL_CNT, SND_CNT, SW_CNT, UINPUT_MAX_NAME_SIZE,
+            input_keymap_entry, ABS_CNT, EV_CNT, FF_CNT, INPUT_PROP_CNT,
+            KEY_CNT, LED_CNT, MSC_CNT, REL_CNT, SND_CNT, SW_CNT,
         };
+        #[cfg(feature = "virtual")]
+        pub(crate) use libc::{uinput_abs_setup, uinput_setup, UINPUT_MAX_NAME_SIZE};
     } else {
         mod non_linux;
         pub(crate) use non_linux::{
             ff_condition_effect, ff_constant_effect, ff_envelope, ff_periodic_effect, ff_ramp_effect,
             ff_replay, ff_rumble_effect, ff_trigger, input_absinfo, input_event, input_id,
-            input_keymap_entry, uinput_abs_setup, uinput_setup, ABS_CNT, EV_CNT, FF_CNT, INPUT_PROP_CNT,
-            KEY_CNT, LED_CNT, MSC_CNT, REL_CNT, SND_CNT, SW_CNT, UINPUT_MAX_NAME_SIZE,
+            input_keymap_entry, ABS_CNT, EV_CNT, FF_CNT, INPUT_PROP_CNT,
+            KEY_CNT, LED_CNT, MSC_CNT, REL_CNT, SND_CNT, SW_CNT,
         };
+        #[cfg(feature = "virtual")]
+        pub(crate) use non_linux::{uinput_abs_setup, uinput_setup, UINPUT_MAX_NAME_SIZE};
     }
 }

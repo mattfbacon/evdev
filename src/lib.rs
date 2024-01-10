@@ -176,9 +176,12 @@ pub mod raw_stream;
 mod scancodes;
 mod sync_stream;
 mod sys;
+#[cfg(feature = "virtual")]
 pub mod uinput;
 
-use crate::compat::{input_absinfo, input_event, uinput_abs_setup};
+#[cfg(feature = "virtual")]
+use crate::compat::uinput_abs_setup;
+use crate::compat::{input_absinfo, input_event};
 use std::fmt::{self, Display};
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
@@ -325,6 +328,7 @@ impl AbsInfo {
 
 common_trait_impls!(input_absinfo, AbsInfo);
 
+cfg_if::cfg_if! { if #[cfg(feature = "virtual")] {
 /// A wrapped `uinput_abs_setup`, used to set up analogue axes with uinput
 ///
 /// `uinput_abs_setup` is a struct containing two fields:
@@ -353,6 +357,7 @@ impl UinputAbsSetup {
 }
 
 common_trait_impls!(uinput_abs_setup, UinputAbsSetup);
+}}
 
 /// A wrapped `input_event` returned by the input device via the kernel.
 ///

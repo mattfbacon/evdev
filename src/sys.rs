@@ -1,11 +1,12 @@
 use crate::compat::{
     ff_condition_effect, ff_constant_effect, ff_periodic_effect, ff_ramp_effect, ff_replay,
-    ff_rumble_effect, ff_trigger, input_absinfo, input_id, input_keymap_entry, uinput_abs_setup,
-    uinput_setup,
+    ff_rumble_effect, ff_trigger, input_absinfo, input_id, input_keymap_entry,
 };
+#[cfg(feature = "virtual")]
+use crate::compat::{uinput_abs_setup, uinput_setup};
 use nix::{
-    convert_ioctl_res, ioctl_none, ioctl_read, ioctl_read_buf, ioctl_readwrite, ioctl_write_int,
-    ioctl_write_ptr, request_code_read,
+    convert_ioctl_res, ioctl_read, ioctl_read_buf, ioctl_write_int, ioctl_write_ptr,
+    request_code_read,
 };
 
 #[repr(C)]
@@ -73,6 +74,9 @@ ioctl_write_int!(eviocgrab, b'E', 0x90);
 ioctl_write_int!(eviocrevoke, b'E', 0x91);
 ioctl_write_int!(eviocsclockid, b'E', 0xa0);
 
+cfg_if::cfg_if! { if #[cfg(feature = "virtual")] {
+use nix::{ioctl_none, ioctl_readwrite};
+
 const UINPUT_IOCTL_BASE: u8 = b'U';
 ioctl_write_ptr!(ui_dev_setup, UINPUT_IOCTL_BASE, 3, uinput_setup);
 ioctl_write_ptr!(ui_abs_setup, UINPUT_IOCTL_BASE, 4, uinput_abs_setup);
@@ -96,6 +100,7 @@ ioctl_readwrite!(ui_begin_ff_upload, UINPUT_IOCTL_BASE, 200, uinput_ff_upload);
 ioctl_write_ptr!(ui_end_ff_upload, UINPUT_IOCTL_BASE, 201, uinput_ff_upload);
 ioctl_readwrite!(ui_begin_ff_erase, UINPUT_IOCTL_BASE, 202, uinput_ff_erase);
 ioctl_write_ptr!(ui_end_ff_erase, UINPUT_IOCTL_BASE, 203, uinput_ff_erase);
+}}
 
 macro_rules! eviocgbit_ioctl {
     ($mac:ident!($name:ident, $ev:ident, $ty:ty)) => {
