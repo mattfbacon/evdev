@@ -634,6 +634,14 @@ fn sync_events(
     (res, consumed_to)
 }
 
+impl fmt::Debug for Device {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Device")
+            .field("name", &self.name())
+            .finish_non_exhaustive()
+    }
+}
+
 impl fmt::Display for Device {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "{}:", self.name().unwrap_or("Unnamed device"))?;
@@ -767,6 +775,7 @@ mod tokio_stream {
     /// This can be used by calling [`stream.next_event().await?`](Self::next_event).
     /// There's also a lower-level [`Self::poll_event`] function if you need to fetch events from
     /// inside a `Future::poll` impl.
+    #[derive(Debug)]
     pub struct EventStream {
         device: AsyncFd<Device>,
     }
