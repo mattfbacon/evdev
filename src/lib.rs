@@ -168,7 +168,6 @@ mod attribute_set;
 mod compat;
 mod constants;
 mod device_state;
-mod error;
 pub mod event_variants;
 mod ff;
 mod inputid;
@@ -189,7 +188,6 @@ use std::time::{Duration, SystemTime};
 pub use attribute_set::{AttributeSet, AttributeSetRef, EvdevEnum};
 pub use constants::*;
 pub use device_state::DeviceState;
-pub use error::Error;
 pub use event_variants::*;
 pub use ff::*;
 pub use inputid::*;
@@ -519,9 +517,8 @@ impl Display for EnumParseError {
 impl std::error::Error for EnumParseError {}
 
 fn fd_write_all(fd: std::os::fd::BorrowedFd<'_>, mut data: &[u8]) -> nix::Result<()> {
-    use std::os::fd::AsRawFd;
     loop {
-        match nix::unistd::write(fd.as_raw_fd(), data) {
+        match nix::unistd::write(fd, data) {
             Ok(0) => return Ok(()),
             Ok(n) => data = &data[n..],
             Err(e) if e == nix::Error::EINTR => {}

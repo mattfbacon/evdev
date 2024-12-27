@@ -6,16 +6,18 @@ use crate::compat::{input_event, input_id, uinput_abs_setup, uinput_setup, UINPU
 use crate::ff::FFEffectData;
 use crate::inputid::{BusType, InputId};
 use crate::{
-    sys, AttributeSetRef, Error, FFEffectCode, InputEvent, KeyCode, MiscCode, PropType,
-    RelativeAxisCode, SwitchCode, SynchronizationEvent, UInputCode, UInputEvent, UinputAbsSetup,
+    sys, AttributeSetRef, FFEffectCode, InputEvent, KeyCode, MiscCode, PropType, RelativeAxisCode,
+    SwitchCode, SynchronizationEvent, UInputCode, UInputEvent, UinputAbsSetup,
 };
-use std::ffi::CString;
+use std::ffi::{CString, OsStr};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
-use std::path::PathBuf;
+use std::os::unix::ffi::OsStrExt;
+use std::path::{Path, PathBuf};
 use std::{fs, io};
 
 const UINPUT_PATH: &str = "/dev/uinput";
 const SYSFS_PATH: &str = "/sys/devices/virtual/input";
+const DEV_PATH: &str = "/dev/input";
 
 #[derive(Debug)]
 pub struct VirtualDeviceBuilder<'a> {
@@ -253,18 +255,13 @@ impl VirtualDevice {
     /// The syspath returned is the one of the input node itself (e.g.
     /// `/sys/devices/virtual/input/input123`), not the syspath of the device node.
     pub fn get_syspath(&mut self) -> io::Result<PathBuf> {
-        let mut bytes = vec![0u8; 256];
-        unsafe { sys::ui_get_sysname(self.fd.as_raw_fd(), &mut bytes)? };
+        let mut syspath = vec![0u8; 256];
+        let len = unsafe { sys::ui_get_sysname(self.fd.as_raw_fd(), &mut syspath)? };
+        syspath.truncate(len as usize - 1);
 
-        if let Some(end) = bytes.iter().position(|c| *c == 0) {
-            bytes.truncate(end);
-        }
+        let syspath = OsStr::from_bytes(&syspath);
 
-        let s = String::from_utf8_lossy(&bytes).into_owned();
-        let mut path = PathBuf::from(SYSFS_PATH);
-        path.push(s);
-
-        Ok(path)
+        Ok(Path::new(SYSFS_PATH).join(syspath))
     }
 
     /// Get the syspaths of the corresponding device nodes in /dev/input.
@@ -303,10 +300,12 @@ impl VirtualDevice {
     ///
     /// The returned event allows the user to allocate and set the effect ID as well as access the
     /// effect data.
-    pub fn process_ff_upload(&mut self, event: UInputEvent) -> Result<FFUploadEvent, Error> {
-        if event.code() != UInputCode::UI_FF_UPLOAD {
-            return Err(Error::InvalidEvent);
-        }
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if `event.code()` is not `UI_FF_UPLOAD`.
+    pub fn process_ff_upload(&mut self, event: UInputEvent) -> io::Result<FFUploadEvent> {
+        assert_eq!(event.code(), UInputCode::UI_FF_UPLOAD);
 
         let mut request: sys::uinput_ff_upload = unsafe { std::mem::zeroed() };
         request.request_id = event.value() as u32;
@@ -325,10 +324,12 @@ impl VirtualDevice {
     ///
     /// The returned event allows the user to access the effect ID, such that it can free any
     /// memory used for the given effect ID.
-    pub fn process_ff_erase(&mut self, event: UInputEvent) -> Result<FFEraseEvent, Error> {
-        if event.code() != UInputCode::UI_FF_ERASE {
-            return Err(Error::InvalidEvent);
-        }
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if `event.code()` is not `UI_FF_ERASE`.
+    pub fn process_ff_erase(&mut self, event: UInputEvent) -> io::Result<FFEraseEvent> {
+        assert_eq!(event.code(), UInputCode::UI_FF_ERASE);
 
         let mut request: sys::uinput_ff_erase = unsafe { std::mem::zeroed() };
         request.request_id = event.value() as u32;
@@ -396,12 +397,18 @@ impl Iterator for DevNodesBlocking {
                 Err(e) => return Some(Err(e)),
             };
 
+            // Map the directory name to its file name.
+            let file_name = entry.file_name();
+
             // Ignore file names that do not start with event.
-            if !entry.file_name().to_string_lossy().starts_with("event") {
+            if !file_name.as_bytes().starts_with(b"event") {
                 continue;
             }
 
-            return Some(Ok(entry.path()));
+            // Construct the path of the form '/dev/input/eventX'.
+            let path = Path::new(DEV_PATH).join(file_name);
+
+            return Some(Ok(path));
         }
 
         None
@@ -421,12 +428,18 @@ impl DevNodes {
     /// Returns the next entry in the set of device nodes.
     pub async fn next_entry(&mut self) -> io::Result<Option<PathBuf>> {
         while let Some(entry) = self.dir.next_entry().await? {
+            // Map the directory name to its file name.
+            let file_name = entry.file_name();
+
             // Ignore file names that do not start with event.
-            if !entry.file_name().to_string_lossy().starts_with("event") {
+            if !file_name.as_bytes().starts_with(b"event") {
                 continue;
             }
 
-            return Ok(Some(entry.path()));
+            // Construct the path of the form '/dev/input/eventX'.
+            let path = Path::new(DEV_PATH).join(file_name);
+
+            return Ok(Some(path));
         }
 
         Ok(None)
